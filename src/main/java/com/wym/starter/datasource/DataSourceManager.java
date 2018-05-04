@@ -52,7 +52,9 @@ public class DataSourceManager {
      * 系统启动之后初始化
      *
      */
-    public static Map<String, SqlSessionFactory> ORG_SQLSESSION_MAP = new HashMap<>();
+    private final  Map<String, SqlSessionFactory> ORG_SQLSESSION_MAP = new HashMap<>();
+
+    private  final  Map<String,DataSource> DATA_SOURCES = new HashMap<>();
 
     final static ReentrantLock lock = new ReentrantLock();
 
@@ -84,7 +86,6 @@ public class DataSourceManager {
                                 sqlSessionFactoryBean.setPlugins(plugins);
                                 sqlSessionFactory =sqlSessionFactoryBean.getObject();
                                 ORG_SQLSESSION_MAP.put(orgCode, sqlSessionFactory);
-
                             } else {
                                 logger.error("DataSourceManager.getSqlSessionFactory 根据机构码获取数据源异常,配置中心数据源信息配置错误 机构码={}",orgCode);
                             }
@@ -157,7 +158,6 @@ public class DataSourceManager {
 
                             Interceptor[] plugins = new Interceptor[] { new CloudPageInterceptor() };
                             sqlSessionFactoryBean.setPlugins(plugins);
-
                             ORG_SQLSESSION_MAP.put(dsConfig.getOrgCode(), sqlSessionFactoryBean.getObject());
                         }
                     } catch(Exception e) {
@@ -175,6 +175,11 @@ public class DataSourceManager {
             //获取每家机构的数据源配置
             try{
                 lock.lock();
+                DATA_SOURCES.values().parallelStream().forEach(dataSource ->{ // 关闭之前的连接
+                    DruidDataSource druidDataSource = (DruidDataSource)dataSource;
+                    druidDataSource.close();
+                });
+                ORG_SQLSESSION_MAP.clear(); // 清除所有sqlsessionfactory
                 for(String key : keySet) {
                     this.createDynamicDataSource(orgDSConfigMap.get(key));
                 }
@@ -200,7 +205,7 @@ public class DataSourceManager {
                 .driverClassName("com.mysql.jdbc.Driver").build();
     }
 
-    private static DataSource createDataSourceDynamic(OrgDSConfig config) {
+    private  DataSource createDataSourceDynamic(OrgDSConfig config) {
         DruidDataSource druidDataSource = new DruidDataSource();
         druidDataSource.setUrl(config.getUrl());
         druidDataSource.setUsername(config.getUserName());
@@ -212,10 +217,10 @@ public class DataSourceManager {
         druidDataSource.setTimeBetweenEvictionRunsMillis(config.getTimeBetweenEvictionRunsMills());
         druidDataSource.setInitialSize(config.getInitialSize());
         druidDataSource.setValidationQuery(config.getValidationQuery());
-
         Log4jdbcProxyDataSource dataSource = new Log4jdbcProxyDataSource();
         dataSource.setDataSource(druidDataSource);
         dataSource.setDumpSqlMaxLineLength(0);
+        DATA_SOURCES.put(config.getOrgCode(),druidDataSource);
         return dataSource;
     }
 
